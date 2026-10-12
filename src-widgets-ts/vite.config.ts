@@ -4,12 +4,13 @@ import vitetsConfigPaths from "vite-tsconfig-paths";
 import { federation } from "@module-federation/vite";
 import { moduleFederationShared } from "@iobroker/types-vis-2/modulefederation.vis.config";
 import { readFileSync } from "node:fs";
+import { type ResolvingPlugin, withPosixResolvedIds } from "./posixResolvedIds";
 
 const pack = JSON.parse(readFileSync("./package.json").toString());
 
 export default {
   plugins: [
-    federation({
+    ...withPosixResolvedIds(federation({
       manifest: true,
       name: "vis2MaterialDesignWidgets",
       filename: "customWidgets.js",
@@ -93,7 +94,7 @@ export default {
       remotes: {},
       shared: moduleFederationShared(pack),
       dts: false,
-    }),
+    }) as ResolvingPlugin[]),
     react(),
     vitetsConfigPaths(),
     commonjs(),
