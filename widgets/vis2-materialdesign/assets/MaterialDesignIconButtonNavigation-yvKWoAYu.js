@@ -1,1 +1,0 @@
-import{t as e}from"./MaterialDesignButtons-VqXZRb_P.js";var t=e({id:`tplVis2-materialdesign-Icon-Button-Navigation`,name:`Icon Button Navigation`,kind:`navigation`,layout:`icon`,label:``,icon:`navigation`});export{t as default};

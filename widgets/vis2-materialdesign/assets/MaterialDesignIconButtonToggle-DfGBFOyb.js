@@ -1,0 +1,1 @@
+import{t as e}from"./MaterialDesignButtons-DbnYsixT.js";var t=e({id:`tplVis2-materialdesign-Icon-Button-Toggle`,name:`Icon Button Toggle`,kind:`toggle`,layout:`icon`,label:``,icon:`checkbox-marked`});export{t as default};
