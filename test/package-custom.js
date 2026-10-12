@@ -140,6 +140,51 @@ for (const component of portedComponents) {
 assert.strictEqual(widgetRegistry.components.length, portedComponents.length, "io-package.json must register exactly the ported VIS2 components");
 assert.ok(fs.existsSync(path.join(root, "widgets", "vis2-materialdesign", "materialdesign-widgets-click-sound.mp3")), "VIS2 click sound must be packaged");
 
+// The React 18 copies of react/jsx-runtime and react-dom that the widget bundle carries as share
+// fallbacks read React's internals the moment they are evaluated. Under vis-2 with React 19 those
+// internals are gone, so a fallback that is evaluated before the share scope is asked crashes the
+// whole widget set (ioBroker.vis-2#689). A fallback may therefore only be reached through import().
+function staticallyImportedFallbacks(chunks) {
+    const fallbacks = Object.keys(chunks).filter((name) => {
+        const code = chunks[name];
+        return (
+            code.includes("__SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED.ReactCurrentOwner") ||
+            (code.includes("createPortal=") && code.includes(".__SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED="))
+        );
+    });
+    const offenders = [];
+    for (const [name, code] of Object.entries(chunks)) {
+        for (const match of code.matchAll(/(?:from|import)\s*"\.\/([^"]+)"/g)) {
+            if (fallbacks.includes(match[1])) {
+                offenders.push(`${name} -> ${match[1]}`);
+            }
+        }
+    }
+    return offenders;
+}
+const jsxFallback = "var o=t.__SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED.ReactCurrentOwner;export{o as jsx};";
+assert.deepStrictEqual(
+    staticallyImportedFallbacks({ "widget.js": 'import{n as e}from"./jsx.js";', "jsx.js": jsxFallback }),
+    ["widget.js -> jsx.js"],
+);
+assert.deepStrictEqual(
+    staticallyImportedFallbacks({ "map.js": "e(()=>import(`./jsx.js`));", "jsx.js": jsxFallback }),
+    [],
+);
+assert.deepStrictEqual(staticallyImportedFallbacks({ "widget.js": 'import"./other.js";', "other.js": "" }), []);
+assert.deepStrictEqual(staticallyImportedFallbacks({}), []);
+const widgetAssets = path.join(root, "widgets", "vis2-materialdesign", "assets");
+const builtChunks = Object.fromEntries(
+    fs.readdirSync(widgetAssets)
+        .filter((name) => name.endsWith(".js"))
+        .map((name) => [name, fs.readFileSync(path.join(widgetAssets, name), "utf8")]),
+);
+assert.deepStrictEqual(
+    staticallyImportedFallbacks(builtChunks),
+    [],
+    "React 18 share fallbacks must only be loaded through import(), or the widget set crashes on vis-2 with React 19",
+);
+
 for (const file of walk(path.join(root, "admin"), (name) => name.endsWith(".json") && !name.endsWith("tsconfig.json"))) {
     JSON.parse(fs.readFileSync(file, "utf8"));
 }

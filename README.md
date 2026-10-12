@@ -115,6 +115,10 @@ full per-widget option and is not deprecated, so nothing you report is a reason
 to wait with an upgrade.
 
 ## Changelog
+### **WORK IN PROGRESS**
+
+- (typhosj) Fixed the widget set failing to load in the upcoming vis-2 release that runs on React 19: the editor dropped the whole set with "Cannot read properties of undefined (reading 'ReactCurrentOwner')" and every placed widget showed as an unknown widget type. The bundle evaluated its own React 18 copy of the JSX runtime before asking vis-2 for the shared one, and that copy cannot run next to React 19. It is now only loaded when vis-2 does not provide the runtime itself, so the same build keeps working on the current vis-2 releases as well (ioBroker/ioBroker.vis-2#689)
+
 ### 1.1.0 (2026-10-03)
 
 - (typhosj) Fixed the JSON Chart flashing its red "Error in JSON string" for the first moments of every page load: an empty datapoint — which is what the widget sees until the first value of its subscription arrives — was read as a broken JSON string. Only content that really is malformed reports the error now. The Top App Bar showed the same error on a drawer whose JSON string had not been filled in yet
