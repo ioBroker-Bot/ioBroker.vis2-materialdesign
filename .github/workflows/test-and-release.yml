@@ -39,6 +39,22 @@ jobs:
       - run: npm ci
       - run: npm test
 
+  # The bundle takes React from vis-2 as a shared singleton: React 18 in vis-2 2.15, React 19 from
+  # the next release on (ioBroker.vis-2#689). The tests above run on React 18; this job on React 19.
+  widgets-react-19:
+    needs: check-and-lint
+    if: contains(github.event.head_commit.message, '[skip ci]') == false
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24.x
+          cache: npm
+      - run: npm ci
+      - run: npm install --no-save react@19 react-dom@19
+      - run: npm run test:widgets
+
   # `widgets/` and `admin/assets/` are checked-in build artifacts — they are what the package ships,
   # and nothing above rebuilds them. Without this job a commit that changes a widget source but
   # forgets the rebuild passes every check and releases the previous bundle.
@@ -66,7 +82,7 @@ jobs:
       - run: npm run test:pr-gate
 
   deploy:
-    needs: [check-and-lint, adapter-tests, build-is-current]
+    needs: [check-and-lint, adapter-tests, widgets-react-19, build-is-current]
     if: |
       contains(github.event.head_commit.message, '[skip ci]') == false &&
       github.event_name == 'push' &&
