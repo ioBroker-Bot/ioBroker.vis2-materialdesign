@@ -143,44 +143,71 @@ assert.ok(fs.existsSync(path.join(root, "widgets", "vis2-materialdesign", "mater
 // The React 18 copies of react/jsx-runtime and react-dom that the widget bundle carries as share
 // fallbacks read React's internals the moment they are evaluated. Under vis-2 with React 19 those
 // internals are gone, so a fallback that is evaluated before the share scope is asked crashes the
-// whole widget set (ioBroker.vis-2#689). A fallback may therefore only be reached through import().
-function staticallyImportedFallbacks(chunks) {
-    const fallbacks = Object.keys(chunks).filter((name) => {
-        const code = chunks[name];
-        return (
-            code.includes("__SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED.ReactCurrentOwner") ||
-            (code.includes("createPortal=") && code.includes(".__SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED="))
-        );
-    });
+// whole widget set (ioBroker.vis-2#689). A fallback may therefore never be in the static import
+// closure of the remote entry or of an exposed widget; a loader chunk that is itself only reached
+// through import() may import it statically.
+function eagerFallbacks(chunks, entries) {
+    const isFallback = (code) =>
+        code.includes("__SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED.ReactCurrentOwner") ||
+        (code.includes("createPortal=") && code.includes(".__SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED="));
     const offenders = [];
-    for (const [name, code] of Object.entries(chunks)) {
-        for (const match of code.matchAll(/(?:from|import)\s*"\.\/([^"]+)"/g)) {
-            if (fallbacks.includes(match[1])) {
-                offenders.push(`${name} -> ${match[1]}`);
+    for (const entry of entries) {
+        const seen = new Set();
+        const stack = [entry];
+        while (stack.length) {
+            const name = stack.pop();
+            if (seen.has(name) || chunks[name] === undefined) {
+                continue;
+            }
+            seen.add(name);
+            if (isFallback(chunks[name])) {
+                offenders.push(`${entry} -> ${name}`);
+            }
+            for (const match of chunks[name].matchAll(/(?:from|import)\s*"\.\/(?:assets\/)?([^"]+)"/g)) {
+                stack.push(match[1]);
             }
         }
     }
     return offenders;
 }
 const jsxFallback = "var o=t.__SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED.ReactCurrentOwner;export{o as jsx};";
+const domFallback = "var c=1;exports.__SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED=x;exports.createPortal=c;";
 assert.deepStrictEqual(
-    staticallyImportedFallbacks({ "widget.js": 'import{n as e}from"./jsx.js";', "jsx.js": jsxFallback }),
+    eagerFallbacks({ "widget.js": 'import{n as e}from"./jsx.js";', "jsx.js": jsxFallback }, ["widget.js"]),
     ["widget.js -> jsx.js"],
 );
+// Through a chain of static imports, and from the remote entry, which names its chunks below assets/.
 assert.deepStrictEqual(
-    staticallyImportedFallbacks({ "map.js": "e(()=>import(`./jsx.js`));", "jsx.js": jsxFallback }),
+    eagerFallbacks({ "entry.js": 'import"./assets/a.js";', "a.js": 'import"./dom.js";', "dom.js": domFallback }, ["entry.js"]),
+    ["entry.js -> dom.js"],
+);
+// A fallback behind import(), directly or through a loader that imports it statically, is fine.
+assert.deepStrictEqual(eagerFallbacks({ "map.js": "e(()=>import(`./jsx.js`));", "jsx.js": jsxFallback }, ["map.js"]), []);
+assert.deepStrictEqual(
+    eagerFallbacks({ "map.js": "e(()=>import(`./loader.js`));", "loader.js": 'import"./dom.js";', "dom.js": domFallback }, ["map.js"]),
     [],
 );
-assert.deepStrictEqual(staticallyImportedFallbacks({ "widget.js": 'import"./other.js";', "other.js": "" }), []);
-assert.deepStrictEqual(staticallyImportedFallbacks({}), []);
-const widgetAssets = path.join(root, "widgets", "vis2-materialdesign", "assets");
+// Import cycles end, missing chunks and an empty bundle pass.
+assert.deepStrictEqual(eagerFallbacks({ "a.js": 'import"./b.js";', "b.js": 'import"./a.js";' }, ["a.js"]), []);
+assert.deepStrictEqual(eagerFallbacks({ "widget.js": 'import"./gone.js";' }, ["widget.js"]), []);
+assert.deepStrictEqual(eagerFallbacks({}, []), []);
+const widgetDir = path.join(root, "widgets", "vis2-materialdesign");
 const builtChunks = Object.fromEntries(
-    fs.readdirSync(widgetAssets)
+    fs.readdirSync(path.join(widgetDir, "assets"))
         .filter((name) => name.endsWith(".js"))
-        .map((name) => [name, fs.readFileSync(path.join(widgetAssets, name), "utf8")]),
+        .map((name) => [name, fs.readFileSync(path.join(widgetDir, "assets", name), "utf8")]),
 );
+builtChunks["customWidgets.js"] = fs.readFileSync(path.join(widgetDir, "customWidgets.js"), "utf8");
+const entries = Object.keys(builtChunks).filter(
+    (name) => name === "customWidgets.js" || widgetRegistry.components.some((component) => name.startsWith(`${component}-`)),
+);
+// Not one chunk per widget: MaterialDesignProgress is also imported by other widgets, so the
+// bundler splits it into its expose chunk and a shared one of the same name. Both count as entries.
+for (const component of widgetRegistry.components) {
+    assert.ok(entries.some((name) => name.startsWith(`${component}-`)), `a chunk of ${component} must exist - run npm run build`);
+}
 assert.deepStrictEqual(
-    staticallyImportedFallbacks(builtChunks),
+    eagerFallbacks(builtChunks, entries),
     [],
     "React 18 share fallbacks must only be loaded through import(), or the widget set crashes on vis-2 with React 19",
 );
